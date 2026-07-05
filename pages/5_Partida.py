@@ -5,8 +5,8 @@ import streamlit as st
 from src.finance_engine import match_revenue
 from src.live_match_engine import SPEEDS, event_minute, match_status, simulate_round, snapshot
 from src.match_engine import player_rating
-from src.tactic_engine import automatic_lineup, tactic_object
-from src.ui import get_database, match_card, mobile_nav, page_title, require_club, styled_table
+from src.tactic_engine import tactic_modifiers, compatibility_bonus
+from src.ui import automatic_lineup, tactic_object, get_database, match_card, mobile_nav, page_title, require_club, styled_table
 
 
 db = get_database(); club = require_club(db); mobile_nav()
