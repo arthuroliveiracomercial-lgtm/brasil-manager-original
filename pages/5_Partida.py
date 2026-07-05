@@ -17,7 +17,7 @@ if not next_match:
     st.success("Temporada encerrada. A classificação final já está disponível.")
     col1, col2 = st.columns(2)
     with col1:
-        st.link_button("🏆 Ver Classificação", "/Classificacao", width="stretch")
+        st.page_link("pages/6_Classificacao.py", label="🏆 Ver Classificação", use_container_width=True)
     with col2:
         if st.button("▶️ Iniciar próxima temporada", type="primary", width="stretch"):
             new_season = db.advance_season()

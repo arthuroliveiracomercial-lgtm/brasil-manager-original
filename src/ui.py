@@ -213,11 +213,11 @@ def sidebar_profile(database, club):
 def mobile_nav():
     st.markdown(
         '<nav class="mobile-nav">'
-        '<a href="/"><span>🏠</span>Início</a>'
-        '<a href="/Elenco"><span>👥</span>Elenco</a>'
-        '<a href="/Escalacao"><span>📋</span>Time</a>'
-        '<a href="/Partida"><span>▶️</span>Jogar</a>'
-        '<a href="/Mais"><span>•••</span>Mais</a>'
+        '<a href="/" target="_self"><span>🏠</span>Início</a>'
+        '<a href="/Elenco" target="_self"><span>👥</span>Elenco</a>'
+        '<a href="/Escalacao" target="_self"><span>📋</span>Time</a>'
+        '<a href="/Partida" target="_self"><span>▶️</span>Jogar</a>'
+        '<a href="/Mais" target="_self"><span>•••</span>Mais</a>'
         '</nav>',
         unsafe_allow_html=True,
     )

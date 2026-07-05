@@ -24,4 +24,4 @@ frame = pd.DataFrame(shown)[["data","mandante","Placar","visitante","Status","De
 frame.columns = ["Data","Mandante","Placar","Visitante","Status",""]
 styled_table(frame)
 if selected == current_round:
-    st.link_button("▶️ Ir para esta Partida", "/5_Partida", width="stretch")
+    st.page_link("pages/5_Partida.py", label="▶️ Ir para esta Partida", use_container_width=True)

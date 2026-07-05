@@ -203,3 +203,11 @@ rápido a **Início**, **Elenco**, **Time**, **Jogar** e **Mais**.
 A área **Mais** reúne treino semanal, notícias, relatórios de olheiros, replays textuais,
 configurações, regras personalizadas e versões locais do save. As telas foram ajustadas para
 toque e leitura em uma coluna, sem depender da barra lateral no navegador do celular.
+
+## Atualização desta versão
+
+- Base inicial com clubes e jogadores das Séries A, B e C.
+- Correção do menu mobile para navegar na mesma aba.
+- Correção de continuidade da temporada com botão para iniciar a próxima temporada.
+- Calendários gerados para Copa do Brasil, Estaduais, Libertadores e Sul-Americana na aba Copas.
+- Correção para remover clubes genéricos antigos da Série B/C e usar a base atualizada.
