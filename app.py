@@ -42,8 +42,20 @@ if club:
             match_card(next_match["mandante_nome"], next_match["visitante_nome"], "×", f"Rodada {next_match['rodada']} · {next_match['data']}")
         else:
             st.success("Temporada encerrada.")
+            if st.button("Iniciar próxima temporada", type="primary", width="stretch"):
+                new_season = db.advance_season()
+                st.cache_resource.clear()
+                st.success(f"Temporada {new_season} criada. Boa sorte!")
+                st.rerun()
     with right:
-        st.page_link("pages/5_Partida.py", label="Ir para Próxima Partida", icon="▶️", use_container_width=True)
+        if next_match:
+            st.page_link("pages/5_Partida.py", label="Ir para Próxima Partida", icon="▶️", use_container_width=True)
+        else:
+            if st.button("▶️ Começar temporada seguinte", width="stretch"):
+                new_season = db.advance_season()
+                st.cache_resource.clear()
+                st.success(f"Temporada {new_season} criada. Boa sorte!")
+                st.rerun()
         st.page_link("pages/2_Escalacao.py", label="Revisar Escalação", icon="📋", use_container_width=True)
         st.page_link("pages/3_Tatica.py", label="Ajustar Tática", icon="🧠", use_container_width=True)
         st.page_link("pages/6_Classificacao.py", label="Ver Classificação", icon="🏆", use_container_width=True)

@@ -15,7 +15,15 @@ page_title("Central da Rodada", "Todos os jogos, minuto a minuto")
 
 if not next_match:
     st.success("Temporada encerrada. A classificação final já está disponível.")
-    st.link_button("🏆 Ver Classificação", "/Classificacao")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.link_button("🏆 Ver Classificação", "/Classificacao", width="stretch")
+    with col2:
+        if st.button("▶️ Iniciar próxima temporada", type="primary", width="stretch"):
+            new_season = db.advance_season()
+            st.cache_resource.clear()
+            st.success(f"Temporada {new_season} criada. Boa sorte!")
+            st.rerun()
     st.stop()
 
 round_number = next_match["rodada"]

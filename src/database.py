@@ -475,3 +475,70 @@ class Database:
             except Exception:
                 conn.rollback()
                 raise
+
+    def advance_season(self) -> int:
+        """Fecha a temporada atual e prepara uma nova usando o mesmo calendário-base.
+
+        A ideia é permitir continuidade no Streamlit sem precisar importar tudo de novo:
+        preserva clubes, jogadores e escolha do usuário; limpa resultados; incrementa ano,
+        idade dos jogadores e agenda as mesmas rodadas para a temporada seguinte.
+        """
+        with closing(self.connect()) as conn:
+            try:
+                conn.execute("BEGIN")
+                state = conn.execute("SELECT * FROM game_state WHERE id=1").fetchone()
+                current_season = int(state["temporada"] or 2026)
+                new_season = current_season + 1
+
+                # Guarda um resumo simples da classificação final antes de zerar.
+                rows = conn.execute(
+                    "SELECT competition_id,club_id,pontos,saldo,gols_pro FROM classificacao "
+                    "ORDER BY competition_id,pontos DESC,saldo DESC,gols_pro DESC"
+                ).fetchall()
+                position_by_comp = {}
+                for row in rows:
+                    comp = row["competition_id"]
+                    position_by_comp[comp] = position_by_comp.get(comp, 0) + 1
+                    conn.execute(
+                        "INSERT INTO season_history(temporada,club_id,competition_id,posicao,resultado,premio) "
+                        "VALUES(?,?,?,?,?,0)",
+                        (current_season, row["club_id"], comp, str(position_by_comp[comp]), f"{row['pontos']} pts"),
+                    )
+
+                # Limpa dados da temporada anterior.
+                for table in (
+                    "eventos_partida", "detalhes_partida", "match_replays", "match_substitutions",
+                    "in_match_tactical_changes", "training_plans", "news_items", "scouting_reports",
+                ):
+                    conn.execute(f"DELETE FROM {table}")
+
+                conn.execute(
+                    "UPDATE classificacao SET jogos=0,vitorias=0,empates=0,derrotas=0,"
+                    "gols_pro=0,gols_contra=0,saldo=0,pontos=0"
+                )
+                conn.execute("UPDATE calendario SET jogado=0,gols_mandante=NULL,gols_visitante=NULL")
+
+                # Ajusta o ano das datas do calendário.
+                matches = conn.execute("SELECT match_id,data FROM calendario").fetchall()
+                for match in matches:
+                    raw_date = str(match["data"] or "")
+                    if len(raw_date) >= 4 and raw_date[:4].isdigit():
+                        conn.execute(
+                            "UPDATE calendario SET data=? WHERE match_id=?",
+                            (str(new_season) + raw_date[4:], match["match_id"]),
+                        )
+
+                # Evolução simples do elenco para dar sensação de carreira.
+                conn.execute(
+                    "UPDATE jogadores SET idade=idade+1, moral=70, condicao_fisica=95, "
+                    "status='Disponível'"
+                )
+                conn.execute(
+                    "UPDATE game_state SET temporada=?, rodada_atual=1, data_atual=?, iniciado=1 WHERE id=1",
+                    (new_season, f"{new_season}-01-01"),
+                )
+                conn.commit()
+                return new_season
+            except Exception:
+                conn.rollback()
+                raise
