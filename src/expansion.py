@@ -364,3 +364,125 @@ def _insert_competition_rows(database, rows):
         " VALUES(?,?,?,?,?,?,?,?,?,?,?,'Pendente')",
         rows,
     )
+
+# --- Rebuild de estrutura v2: divisões separadas e copas sem fases futuras pré-definidas ---
+def rebuild_competition_structure(database, season=2026, force=False):
+    """Corrige bases antigas que misturavam séries ou criavam finais antes da hora."""
+    database.run_migrations()
+    # Executa sempre de forma idempotente para evitar saves corrompidos por versões anteriores.
+    _ensure_competition_records(database, season)
+    _ensure_transfer_windows(database, season)
+    _remove_old_generic_bc(database)
+    _ensure_series_b_c(database, season)
+    _ensure_continental_clubs(database)
+    _rebuild_domestic_leagues(database, season)
+    _rebuild_cups_initial_phases(database, season)
+
+
+def _rebuild_domestic_leagues(database, season):
+    from .league_engine import round_robin, empty_standing
+    comps = [("A", "COMP001", date(season, 4, 5)), ("B", "COMP002", date(season, 4, 10)), ("C", "COMP003", date(season, 4, 12))]
+    # Se qualquer competição estiver com times demais na classificação, refaz liga nacional.
+    needs = False
+    for _, comp_id, _ in comps:
+        count = database.query("SELECT COUNT(*) n FROM classificacao WHERE competition_id=?", (comp_id,))[0]["n"]
+        if count not in (0, 20):
+            needs = True
+    # Também refaz quando COMP001 contém clubes B/C.
+    mixed = database.query("SELECT COUNT(*) n FROM classificacao cl JOIN clubes c ON c.club_id=cl.club_id WHERE cl.competition_id='COMP001' AND c.divisao<>'A'")[0]["n"]
+    if mixed:
+        needs = True
+    if not needs and database.query("SELECT COUNT(*) n FROM calendario WHERE competition_id IN ('COMP001','COMP002','COMP003')")[0]["n"] >= 700:
+        return
+    with closing(database.connect()) as conn:
+        conn.execute("DELETE FROM eventos_partida")
+        conn.execute("DELETE FROM detalhes_partida")
+        conn.execute("DELETE FROM calendario WHERE competition_id IN ('COMP001','COMP002','COMP003','BRA-A','BRA-B','BRA-C')")
+        conn.execute("DELETE FROM classificacao WHERE competition_id IN ('COMP001','COMP002','COMP003','BRA-A','BRA-B','BRA-C')")
+        for division, comp_id, start_dt in comps:
+            club_ids = [r[0] for r in conn.execute("SELECT club_id FROM clubes WHERE divisao=? ORDER BY reputacao DESC, club_id LIMIT 20", (division,)).fetchall()]
+            conn.executemany(
+                "INSERT INTO calendario(match_id,competition_id,rodada,data,mandante_id,visitante_id,estadio,jogado,gols_mandante,gols_visitante) "
+                "VALUES(:match_id,:competition_id,:rodada,:data,:mandante_id,:visitante_id,:estadio,:jogado,:gols_mandante,:gols_visitante)",
+                round_robin(club_ids, competition_id=comp_id, start=start_dt),
+            )
+            conn.executemany(
+                "INSERT INTO classificacao(competition_id,club_id,jogos,vitorias,empates,derrotas,gols_pro,gols_contra,saldo,pontos) "
+                "VALUES(:competition_id,:club_id,:jogos,:vitorias,:empates,:derrotas,:gols_pro,:gols_contra,:saldo,:pontos)",
+                empty_standing(club_ids, competition_id=comp_id),
+            )
+            conn.execute("UPDATE competicoes SET numero_times=?, divisao=? WHERE competition_id=?", (len(club_ids), division, comp_id))
+        conn.execute("UPDATE game_state SET rodada_atual=1 WHERE id=1")
+        conn.commit()
+
+
+def _rebuild_cups_initial_phases(database, season):
+    # Sempre remove o calendário de copas bugado que pré-criava quartas/semi/final.
+    database.execute("DELETE FROM competition_matches")
+    _seed_copa_do_brasil_initial(database, season)
+    _seed_estaduais_initial(database, season)
+    _seed_continentais_groups_only(database, season)
+
+
+def _seed_copa_do_brasil_initial(database, season):
+    clubs = _ordered_brazilian_clubs(database)[:60]
+    rng = random.Random(1601)
+    rng.shuffle(clubs)
+    rows = []
+    start = date(season, 2, 18)
+    for idx in range(0, len(clubs)-1, 2):
+        home, away = clubs[idx], clubs[idx+1]
+        rows.append((f"CDB-F1-{idx//2+1:02d}", "CDB", "1ª fase", None, (start + timedelta(days=(idx//2)//10)).isoformat(), home, away, 1, 1, None, None))
+    _insert_competition_rows(database, rows)
+    database.execute("UPDATE competitions SET fase_atual='1ª fase', formato='Mata-mata progressivo', numero_clubes=? WHERE competition_id='CDB'", (len(clubs),))
+
+
+def _seed_estaduais_initial(database, season):
+    for comp_id, (state, start, target) in STATE_COMPETITIONS.items():
+        clubs = [row["club_id"] for row in database.query(
+            "SELECT club_id FROM clubes WHERE estado=? AND divisao IN ('A','B','C') ORDER BY reputacao DESC,club_id LIMIT ?", (state, target)
+        )]
+        if len(clubs) < 4:
+            fillers = [row["club_id"] for row in database.query(
+                "SELECT club_id FROM clubes WHERE divisao IN ('A','B','C') AND estado<>? ORDER BY reputacao DESC,club_id LIMIT ?", (state, 4-len(clubs))
+            )]
+            clubs += fillers
+        clubs = clubs[:max(4, min(target, len(clubs)))]
+        rows = []
+        if len(clubs) >= 2:
+            league_matches = generate_league_calendar(clubs, comp_id, start)
+            max_round = max(1, len(clubs)-1)
+            for m in league_matches:
+                if m["rodada"] <= max_round:
+                    rows.append((m["match_id"], comp_id, "Fase classificatória", None, m["data"], m["mandante_id"], m["visitante_id"], m["rodada"], 1, None, None))
+            _insert_competition_rows(database, rows)
+            database.execute("UPDATE competitions SET fase_atual='Fase classificatória', formato='Classificatória + mata-mata', numero_clubes=? WHERE competition_id=?", (len(clubs), comp_id))
+
+
+def _seed_continentais_groups_only(database, season):
+    brazil = [row["club_id"] for row in database.query("SELECT club_id FROM clubes WHERE divisao='A' ORDER BY reputacao DESC,club_id")]
+    invited = [row["club_id"] for row in database.query("SELECT club_id FROM clubes WHERE divisao='INT' ORDER BY reputacao DESC,club_id")]
+    lib = (brazil[:8] + invited[:24])[:32]
+    sula = (brazil[8:16] + [row["club_id"] for row in database.query("SELECT club_id FROM clubes WHERE divisao IN ('B','C') ORDER BY reputacao DESC,club_id LIMIT 8")] + invited[8:24])[:32]
+    _seed_group_stage_only(database, "LIB", lib, date(season, 3, 3), seed=3710)
+    _seed_group_stage_only(database, "SULA", sula, date(season, 3, 5), seed=3720)
+    database.execute("UPDATE competitions SET fase_atual='Fase de grupos', formato='Grupos + mata-mata progressivo', numero_clubes=? WHERE competition_id='LIB'", (len(lib),))
+    database.execute("UPDATE competitions SET fase_atual='Fase de grupos', formato='Grupos + mata-mata progressivo', numero_clubes=? WHERE competition_id='SULA'", (len(sula),))
+
+
+def _seed_group_stage_only(database, comp_id, clubs, start, seed):
+    rng = random.Random(seed)
+    clubs = list(clubs)
+    rng.shuffle(clubs)
+    rows = []
+    for gi in range(0, len(clubs), 4):
+        group = clubs[gi:gi+4]
+        if len(group) < 4:
+            continue
+        group_name = f"Grupo {chr(65+gi//4)}"
+        fixtures = [(0,1),(2,3),(0,2),(3,1),(0,3),(1,2)]
+        for i, (a,b) in enumerate(fixtures, 1):
+            dt = start + timedelta(days=(i-1)*14)
+            rows.append((f"{comp_id}-{group_name[-1]}-R{i:02d}-J1", comp_id, "Fase de grupos", group_name, dt.isoformat(), group[a], group[b], i, 1, None, None))
+            rows.append((f"{comp_id}-{group_name[-1]}-R{i:02d}-J2", comp_id, "Fase de grupos", group_name, dt.isoformat(), group[(a+2)%4], group[(b+2)%4], i, 1, None, None))
+    _insert_competition_rows(database, rows)

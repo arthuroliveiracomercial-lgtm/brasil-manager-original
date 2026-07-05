@@ -18,13 +18,14 @@ page_title("Brasil Manager", f"Temporada {state['temporada']} · o futebol brasi
 
 if club:
     next_match = db.next_user_match(club["club_id"])
+    league_comp = db.competition_for_club(club["club_id"])
     position = db.query(
-        "SELECT COUNT(*)+1 posicao FROM classificacao c WHERE c.pontos>(SELECT pontos FROM classificacao WHERE club_id=?)",
-        (club["club_id"],),
+        "SELECT COUNT(*)+1 posicao FROM classificacao c WHERE c.competition_id=? AND c.pontos>(SELECT pontos FROM classificacao WHERE club_id=? AND competition_id=?)",
+        (league_comp, club["club_id"], league_comp),
     )[0]["posicao"]
     top = st.columns(4)
     with top[0]: card("Clube", club["nome"], f"{club['estado']} · Série {club['divisao']}", "#0D5C4A")
-    with top[1]: card("Classificação", f"{position}º lugar", f"Rodada {next_match['rodada'] if next_match else 'final'}", "#F4B942")
+    with top[1]: card("Classificação", f"{position}º lugar", f"{next_match['competition_nome'] if next_match else 'Temporada finalizada'}", "#F4B942")
     with top[2]: card("Saldo em caixa", format_brl(club["saldo_caixa"]), "Finanças do clube", "#34D399")
     with top[3]: card("Reputação", club["reputacao"], club["estadio"], "#3B82F6")
     players = db.query("SELECT salario,moral,condicao_fisica FROM jogadores WHERE clube_id=?", (club["club_id"],))

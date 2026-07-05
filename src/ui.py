@@ -10,7 +10,7 @@ from .database import Database
 from .match_engine import player_rating
 from .models import FORMATIONS, Tactic
 from .formation_view import render_pitch as formation_render_pitch
-from .expansion import seed_expansion
+from .expansion import seed_expansion, rebuild_competition_structure
 
 COLORS = {"navy": "#071B2B", "green": "#0D5C4A", "lime": "#34D399", "gold": "#F4B942", "muted": "#8EA5B5"}
 
@@ -40,6 +40,14 @@ def inject_css():
     .pitch:after {content:"";position:absolute;left:50%;top:4%;bottom:4%;border-left:2px solid #FFFFFF90}
     .player-chip {position:absolute;transform:translate(-50%,-50%);width:132px;background:#071B2BEE;color:white;border:2px solid #34D399;border-radius:12px;padding:7px;text-align:center;z-index:2;box-shadow:0 5px 12px #0018}
     .player-chip.warn {border-color:#F4B942}.player-pos{font-size:.65rem;color:#7FE2C4;font-weight:900}.player-name{font-size:.78rem;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.player-role{font-size:.61rem;color:#B9CDD5}.player-rate{color:#F4B942;font-weight:900}
+
+    .retro-panel {background:#114323;border:2px solid #2a6b35;color:#eefbe9;border-radius:3px;padding:10px;box-shadow:inset 0 0 0 1px #0a2d17}
+    .retro-title {background:#173a1f;color:#f4e77a;font-weight:800;padding:5px 8px;margin:-10px -10px 8px;border-bottom:1px solid #2a6b35}
+    .retro-scoreboard {background:#0e3a20;color:#eafce7;border:1px solid #6e8e45;padding:8px;border-radius:3px;text-align:center}
+    .retro-table {font-size:.82rem}
+    .live-row {display:grid;grid-template-columns:1fr 36px 36px 1fr;gap:3px;align-items:center;margin:3px 0}
+    .team-cell {background:#e8f8e3;color:#102c1a;padding:4px 6px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .score-cell {background:#78a65c;color:white;text-align:center;padding:4px 0;font-weight:900}
     .mobile-nav {display:none}
     @media (max-width: 700px) {
       .block-container {padding:1rem .65rem 5.5rem;max-width:100%}
@@ -70,7 +78,8 @@ def get_database():
     database = Database(os.getenv("BRASIL_MANAGER_DB", "database/brasil_manager.db"))
     workbook = Path(__file__).resolve().parents[1] / "data" / "modelos" / "modelo_importacao_brasil_manager.xlsx"
     bootstrap_game(database, workbook)
-    seed_expansion(database)
+    # Corrige saves antigos da nuvem que misturavam Série A, B e C ou criavam copas sem progressão.
+    rebuild_competition_structure(database, int(database.state().get("temporada") or 2026))
     return database
 
 

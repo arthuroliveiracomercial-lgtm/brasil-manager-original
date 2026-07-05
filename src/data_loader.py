@@ -39,7 +39,12 @@ def load_upload(filename: str, content: bytes, dataset: str | None = None) -> di
 
 
 def bootstrap_game(database, workbook_path: str | Path = "data/modelos/modelo_importacao_brasil_manager.xlsx") -> bool:
-    """Importa o Excel e completa uma liga fictícia quando o banco está vazio."""
+    """Importa a planilha inicial e prepara a base sem misturar divisões.
+
+    A versão anterior recriava o calendário usando todos os clubes como se fossem
+    uma única Série A. Agora a planilha é respeitada: Série A, B e C ficam em
+    competições separadas.
+    """
     if database.table_counts()["clubes"]:
         return False
     path = Path(workbook_path)
@@ -52,7 +57,6 @@ def bootstrap_game(database, workbook_path: str | Path = "data/modelos/modelo_im
         messages = "; ".join(issue.message for issue in result.issues if issue.severity == "erro")
         raise ValueError(f"Planilha inicial inválida: {messages}")
     database.import_frames(result.data, path.name, "atualizar")
-    _complete_clubs(database)
     _complete_players(database)
     _create_season(database)
     return True
@@ -134,20 +138,28 @@ def _complete_players(database) -> None:
 
 
 def _create_season(database) -> None:
-    clubs = database.query("SELECT club_id FROM clubes ORDER BY club_id")
-    club_ids = [club["club_id"] for club in clubs]
-    matches = round_robin(club_ids, start=date(2026, 4, 5))
-    standings = empty_standing(club_ids)
+    """Garante classificação e calendário separados para A, B e C."""
+    from .league_engine import round_robin, empty_standing
+    comps = [("A", "COMP001", date(2026, 4, 5)), ("B", "COMP002", date(2026, 4, 10)), ("C", "COMP003", date(2026, 4, 12))]
     with closing(database.connect()) as conn:
-        conn.execute("DELETE FROM calendario")
         conn.execute("DELETE FROM classificacao")
-        conn.executemany(
-            "INSERT INTO calendario(match_id,competition_id,rodada,data,mandante_id,visitante_id,estadio,jogado,gols_mandante,gols_visitante)"
-            " VALUES(:match_id,:competition_id,:rodada,:data,:mandante_id,:visitante_id,:estadio,:jogado,:gols_mandante,:gols_visitante)", matches,
-        )
-        conn.executemany(
-            "INSERT INTO classificacao(competition_id,club_id,jogos,vitorias,empates,derrotas,gols_pro,gols_contra,saldo,pontos)"
-            " VALUES(:competition_id,:club_id,:jogos,:vitorias,:empates,:derrotas,:gols_pro,:gols_contra,:saldo,:pontos)", standings,
-        )
-        conn.execute("UPDATE competicoes SET numero_times=? WHERE competition_id='COMP001'", (len(club_ids),))
+        # Preserva o calendário importado quando ele já está correto; se não houver, recria.
+        existing = conn.execute("SELECT COUNT(*) FROM calendario").fetchone()[0]
+        if existing == 0:
+            for division, comp_id, start_date in comps:
+                club_ids = [r[0] for r in conn.execute("SELECT club_id FROM clubes WHERE divisao=? ORDER BY club_id", (division,)).fetchall()[:20]]
+                if club_ids:
+                    conn.executemany(
+                        "INSERT INTO calendario(match_id,competition_id,rodada,data,mandante_id,visitante_id,estadio,jogado,gols_mandante,gols_visitante) "
+                        "VALUES(:match_id,:competition_id,:rodada,:data,:mandante_id,:visitante_id,:estadio,:jogado,:gols_mandante,:gols_visitante)",
+                        round_robin(club_ids, competition_id=comp_id, start=start_date),
+                    )
+        for division, comp_id, _ in comps:
+            club_ids = [r[0] for r in conn.execute("SELECT club_id FROM clubes WHERE divisao=? ORDER BY club_id", (division,)).fetchall()[:20]]
+            conn.executemany(
+                "INSERT OR IGNORE INTO classificacao(competition_id,club_id,jogos,vitorias,empates,derrotas,gols_pro,gols_contra,saldo,pontos) "
+                "VALUES(:competition_id,:club_id,:jogos,:vitorias,:empates,:derrotas,:gols_pro,:gols_contra,:saldo,:pontos)",
+                empty_standing(club_ids, competition_id=comp_id),
+            )
+            conn.execute("UPDATE competicoes SET numero_times=? WHERE competition_id=?", (len(club_ids), comp_id))
         conn.commit()

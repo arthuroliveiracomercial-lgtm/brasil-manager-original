@@ -367,12 +367,19 @@ class Database:
             "WHERE e.club_id=? ORDER BY e.slot", (club_id,),
         )
 
+    def competition_for_club(self, club_id: str) -> str:
+        rows = self.query("SELECT divisao FROM clubes WHERE club_id=?", (club_id,))
+        division = rows[0]["divisao"] if rows else "A"
+        return {"A": "COMP001", "B": "COMP002", "C": "COMP003"}.get(division, "COMP001")
+
     def next_user_match(self, club_id: str) -> dict | None:
+        competition_id = self.competition_for_club(club_id)
         rows = self.query(
-            "SELECT c.*,m.nome mandante_nome,v.nome visitante_nome FROM calendario c "
+            "SELECT c.*,co.nome competition_nome,m.nome mandante_nome,v.nome visitante_nome FROM calendario c "
             "JOIN clubes m ON m.club_id=c.mandante_id JOIN clubes v ON v.club_id=c.visitante_id "
-            "WHERE c.jogado=0 AND (c.mandante_id=? OR c.visitante_id=?) ORDER BY c.rodada,c.data LIMIT 1",
-            (club_id, club_id),
+            "LEFT JOIN competicoes co ON co.competition_id=c.competition_id "
+            "WHERE c.jogado=0 AND c.competition_id=? AND (c.mandante_id=? OR c.visitante_id=?) ORDER BY c.rodada,c.data LIMIT 1",
+            (competition_id, club_id, club_id),
         )
         return rows[0] if rows else None
 
@@ -380,9 +387,10 @@ class Database:
         with closing(self.connect()) as conn:
             try:
                 conn.execute("BEGIN")
-                pending = conn.execute("SELECT jogado FROM calendario WHERE match_id=?", (result.match_id,)).fetchone()
+                pending = conn.execute("SELECT jogado,competition_id FROM calendario WHERE match_id=?", (result.match_id,)).fetchone()
                 if not pending or pending["jogado"]:
                     raise ValueError("Esta partida já foi simulada.")
+                competition_id = pending["competition_id"]
                 conn.execute(
                     "UPDATE calendario SET jogado=1,gols_mandante=?,gols_visitante=? WHERE match_id=?",
                     (result.home_goals, result.away_goals, result.match_id),
@@ -396,20 +404,21 @@ class Database:
                     (result.match_id, json.dumps(result.statistics, ensure_ascii=False),
                      result.best_player, json.dumps(result.scorers, ensure_ascii=False)),
                 )
-                self._update_standing(conn, result.home_id, result.home_goals, result.away_goals)
-                self._update_standing(conn, result.away_id, result.away_goals, result.home_goals)
+                self._update_standing(conn, competition_id, result.home_id, result.home_goals, result.away_goals)
+                self._update_standing(conn, competition_id, result.away_id, result.away_goals, result.home_goals)
                 conn.commit()
             except Exception:
                 conn.rollback()
                 raise
 
     @staticmethod
-    def _update_standing(conn, club_id: str, goals_for: int, goals_against: int) -> None:
+    def _update_standing(conn, competition_id: str, club_id: str, goals_for: int, goals_against: int) -> None:
         win, draw, loss = int(goals_for > goals_against), int(goals_for == goals_against), int(goals_for < goals_against)
+        conn.execute("INSERT OR IGNORE INTO classificacao(competition_id,club_id) VALUES(?,?)", (competition_id, club_id))
         conn.execute(
             "UPDATE classificacao SET jogos=jogos+1,vitorias=vitorias+?,empates=empates+?,derrotas=derrotas+?,"
-            "gols_pro=gols_pro+?,gols_contra=gols_contra+?,saldo=saldo+?,pontos=pontos+? WHERE club_id=?",
-            (win, draw, loss, goals_for, goals_against, goals_for - goals_against, win * 3 + draw, club_id),
+            "gols_pro=gols_pro+?,gols_contra=gols_contra+?,saldo=saldo+?,pontos=pontos+? WHERE competition_id=? AND club_id=?",
+            (win, draw, loss, goals_for, goals_against, goals_for - goals_against, win * 3 + draw, competition_id, club_id),
         )
 
     def add_finance(self, club_id: str, kind: str, description: str, value: float, when: str) -> None:
